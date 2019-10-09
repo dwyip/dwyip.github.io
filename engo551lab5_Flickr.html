@@ -1,0 +1,214 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+
+	<title>Flickr API</title>
+
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+	<!-- Link to Leaflet CSS & JS file -->
+	<link rel="stylesheet" href="Leaflet/leaflet.css" />
+	<script src="Leaflet/leaflet.js"></script>
+
+	<style>
+		html, body {
+			height: 100%;
+			margin: 0;
+		}
+		#map {
+			width: 100%;
+			height: 100%;
+		}
+		.search {
+			background-color: white;
+			right: 10px;
+			padding: 0px 40px 15px 40px;
+			border: 3px dashed pink;
+
+		}
+		.info {
+			background-color: white;
+			right: 10px;
+			padding: 0px 40px 15px 40px;
+			border: 3px dashed pink;
+
+		}
+  </style>
+
+
+</head>
+<body>
+
+
+<div id='map'></div>
+
+<script type="text/javascript">
+
+	//Changed map to be centered in Canada
+	var map = L.map('map').setView([60.31138889, -100.06888889], 4);
+
+	L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+		maxZoom: 19,
+		attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Tiles style by <a href="https://www.hotosm.org/" target="_blank">Humanitarian OpenStreetMap Team</a> hosted by <a href="https://openstreetmap.fr/" target="_blank">OpenStreetMap France</a>'
+	}).addTo(map);
+
+
+  //Creating base class for map controls
+  var search = L.control();
+  //Returns div and add searchbox
+	search.onAdd = function (map) {
+    // Create HTML elements div & search
+		this._div = L.DomUtil.create('div', 'search');
+		this.addForm();
+		return this._div;
+	};
+
+	//Adding search form + Submit button
+	search.addForm = function () {
+		this._div.innerHTML =
+		'<form method="post" id="citySearchForm">' +
+		  '<h4>Search for City</h4> <input type="text" id="cityName"><br>' +
+		  '<input type="submit" value="Submit">' +
+		'</form>'
+	};
+
+	search.addTo(map);
+
+  // Display info in div
+  var info = L.control();
+
+	info.onAdd = function (map) {
+		this._div = L.DomUtil.create('div', 'info');
+		this.update();
+		return this._div;
+	};
+
+	info.update = function (feature, lat, lng) {
+		this._div.innerHTML = '<h4>City Information</h4>' +  (feature ?
+			'<p style=color:blue;font-weight:bold> City Name: ' + feature.properties.name
+      + '<br>' + 'Province: ' + feature.properties.province
+      + '<br>' + 'Latitude: ' + lat + '<br>' + 'Longitude: '
+      + lng + '<br> </p>': 'Search for a City!');
+	};
+
+	info.cityNotFound = function(message) {
+		this._div.innerHTML = '<h4>City Information</h4>' +  (message ?
+			'<p style=color:red;font-weight:bold>' + message
+      + '<p>': 'Search for a City!');
+	};
+
+	info.addTo(map);
+
+
+  // GeoJSON Request
+  var geojson;
+
+	function zoomToCity(feature) {
+		var lat = feature.geometry.coordinates[1];
+		var lng = feature.geometry.coordinates[0];
+		map.setView([lat, lng], 13);
+		info.update(feature, lat, lng);
+
+    callFlickr();
+	};
+
+	var cityFound;
+
+	var form = document.getElementById('citySearchForm');
+	form.addEventListener('submit', sendCityName);
+
+	function sendCityName(event) {
+		event.preventDefault();
+		var param = {
+			name: document.getElementById('cityName').value
+		};
+		var xmlhttp = new XMLHttpRequest();
+		xmlhttp.open("POST", "http://localhost:8080/L4Task2.php", true);
+
+		xmlhttp.onload = function() {
+			if (this.status==200) {
+				if (this.responseText != "NoCityFound") {
+					cityFound = JSON.parse(this.responseText);
+					//Parse geoJSON data and display on map with L.geoJSON
+					geojson = L.geoJSON(cityFound, {
+						onEachFeature: zoomToCity
+					}).addTo(map);
+				}
+				else {
+					info.cityNotFound("City not found. Please try again.");
+				}
+			}
+		}
+		xmlhttp.send(JSON.stringify(param));
+	}
+
+  //Getting Photos from Flickr
+  var photoLayer;
+
+	var cameraIcon = L.icon({
+		iconUrl: 'http://localhost:8080/camera.png',
+		iconSize: [25, 25],
+		iconAnchor: [8, 18],
+		popupAnchor: [0, -14]
+	});
+
+	function fetchMorePhoto() {
+		callFlickr();
+	};
+
+  function onEachFeaturePhoto(feature, layer) {
+    var popupContent = '<img src="https://farm' + feature.properties.farm +
+      '.staticflickr.com/' + feature.properties.server +
+      '/' + feature.properties.id +
+      '_' + feature.properties.secret +
+      '.jpg" height="250">';
+
+		layer.bindPopup(popupContent, {
+			maxWidth: "auto"
+		});
+
+    document.querySelector(".leaflet-popup-pane").addEventListener("load", function (event) {
+      var tagName = event.target.tagName,
+          popup = map._popup; // Currently open popup, if any.
+
+      if (tagName === "IMG" && popup) {
+        popup.update();
+      }
+    }, true); // Capture the load event, because it does not bubble.
+
+		map.on({
+			mouseup: fetchMorePhoto
+		});
+	}
+
+	function callFlickr() {
+		var param = {
+			bound: map.getBounds()
+		};
+
+		var xmlhttp = new XMLHttpRequest();
+		xmlhttp.open("POST", "http://localhost:8080/flickr.php", true);
+
+		xmlhttp.onload = function() {
+			if (this.status==200) {
+				foundPhotos = JSON.parse(this.responseText);
+				photoLayer = L.geoJSON(foundPhotos, {
+					pointToLayer: function (feature, latlng) {
+							return L.marker(latlng, {icon: cameraIcon});
+						},
+
+					onEachFeature: onEachFeaturePhoto
+				}).addTo(map);
+			}
+		}
+		xmlhttp.send(JSON.stringify(param));
+	};
+
+</script>
+
+
+
+</body>
+</html>
